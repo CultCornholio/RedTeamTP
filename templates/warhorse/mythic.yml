@@ -1,0 +1,52 @@
+warhorse:
+  general:
+    op_number: "VAR_opnum"
+    user_tag: "VAR_user_tag"
+    ttl: "VAR_ttl"
+    ntp_timezone: 'America/New_York'
+    vault_key: '{{ vault_key }}'  # Ansible placeholder
+  dns:
+    provider: "digitalocean"
+    op_tld: "VAR_domain_tld"
+    op_domain_name: "c2.VAR_domain_tld"
+  vm:
+    - name: "mythic-server"
+      provider: "digitalocean"
+      http_proxy: "traefik"
+      traefik:
+        acme_email: "no-reply@VAR_domain_tld"
+        dashboard: true
+      firewall: 
+        enabled: true
+      mythic:
+        enabled: true
+        admin_password: "VAR_mythic_admin_pwd"  # Match the variable name used in test
+        user_password: "VAR_mythic_user_pwd"    # Match the variable name used in test
+        cdn:
+        - name: "azure1"
+          provider: "azure"
+          hostname: "VAR_cdn_hostname" #Changed from static "mythic-delivery" to variable
+          redirect_url: "https://azure.microsoft.com"
+        - name: "aws1"
+          provider: "aws"
+          redirect_url: "https://aws.amazon.com"
+      backup: 
+        enabled: false
+        archive_zip: false
+  terraform:
+    state_bucket_name: "densecure-tf"
+    state_bucket_enabled: true
+    state_bucket_key: "VAR_opnum/mythic"
+    state_bucket_region: "us-east-2"
+    state_bucket_endpoint: "https://nyc3.digitaloceanspaces.com"
+    bucket_access_key: "{{ bucket_access_key }}"  # Ansible placeholder
+    bucket_secret_key: "{{ bucket_secret_key }}"  # Ansible placeholder
+    digitalocean_token: "{{ do_token }}"  # Ansible placeholder
+    subscription_id: "{{ subscription_id }}"
+  users:
+    VAR_users_section  # Will be populated with GitHub user's SSH keys
+  - username: "VAR_username"
+    name: "VAR_name"
+    authorized_keys:
+     - "VAR_ssh_key"
+    shell: '/bin/bash'

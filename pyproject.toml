@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+include = 'tests\/.*\.pyi?$|lib\/.*\.pyi?$'
+
+[tool.pytest.ini_options]
+pythonpath = [
+    ".",
+    "app",
+    "lib"
+]
+testpaths = ["tests"]
+addopts = "-v -ra -q"
+markers = [
+    "unit: marks tests as unit tests",
+    "integration: marks tests as integration tests"
+]
+
+[project]
+name = "redteamtp"
+version = "0.1.0"
+authors = [
+  { name="CultCornholio", email="author@example.com" },
+]
+description = "Red Team Infrastructure Deployment"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "click>=8.0.0",
+    "pyyaml>=6.0.0",
+    "requests>=2.31.0",
+    "schema>=0.7.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/CultCornholio/RedTeamTP"
+"Bug Tracker" = "https://github.com/CultCornholio/RedTeamTP/issues"
+
+[project.scripts]
+redteam = "app.cli:cli"

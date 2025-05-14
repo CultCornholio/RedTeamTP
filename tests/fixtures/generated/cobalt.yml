@@ -1,0 +1,64 @@
+warhorse:
+  general:
+    op_number: '1234'
+    user_tag: test-opp-tag
+    ttl: '2024-12-31'
+    ntp_timezone: America/New_York
+    vault_key: '{{ vault_key }}'
+  dns:
+    provider: digitalocean
+    op_domain_name: test.domain.com
+    op_tld: domain.com
+  vm:
+  - name: cs-fenrir
+    provider: digitalocean
+    http_proxy: traefik
+    traefik:
+      acme_email: no-reply@PLACEHOLDER_domain_tld
+      dashboard: true
+    firewall:
+      enabled: true
+    golang:
+      enabled: true
+    neo4j:
+      enabled: true
+      username: neo4j
+    cobaltstrike:
+      enabled: true
+      password: '{{ cs_password }}'
+      key: '{{ cs_key }}'
+      dns_over_https: true
+      auth_header_name: test-header
+      auth_header_value: test-value
+      socks_ports:
+      - 9201
+      - 9202
+      - 9203
+      profile: test-profile
+      cdn:
+      - name: azure1
+        provider: azure
+        hostname: cdn.test.com
+        redirect_url: https://azure.microsoft.com
+      - name: aws
+        provider: aws
+        redirect_url: https://aws.com
+    backup:
+      enabled: false
+      archive_zip: false
+  terraform:
+    state_bucket_name: densecure-tf
+    state_bucket_enabled: true
+    state_bucket_key: 1234/redteamtp
+    state_bucket_region: us-east-2
+    state_bucket_endpoint: https://nyc3.digitaloceanspaces.com
+    bucket_access_key: '{{ bucket_access_key }}'
+    bucket_secret_key: '{{ bucket_secret_key }}'
+    digitalocean_token: '{{ do_token }}'
+  users:
+  - username: test
+    name: Test
+    authorized_keys:
+    - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC
+    shell: /usr/bin/zsh
+    email: test@github.com

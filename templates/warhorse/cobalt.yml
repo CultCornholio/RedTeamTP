@@ -1,0 +1,64 @@
+warhorse:
+  general:
+    op_number: "<STAGING_PLACEHOLDER>"
+    user_tag: "<STAGING_PLACEHOLDER>"
+    ttl: "<STAGING_PLACEHOLDER>"  # Will be replaced during the generator workflow run
+    ntp_timezone: 'America/New_York'  # Time Zone Link
+    vault_key: '{{ vault_key }}'  # Will be replaced by GitHub secrets
+  dns:
+    provider: "digitalocean"
+    op_domain_name: "<STAGING_PLACEHOLDER>"  # Will be replaced during the generator workflow run
+    op_tld: "<STAGING_PLACEHOLDER>"  # Will be replaced during the generator workflow run
+  vm:
+    - name: "cs-fenrir"
+      provider: "digitalocean"
+      http_proxy: "traefik"
+      traefik:
+        acme_email: "no-reply@PLACEHOLDER_domain_tld"  # Will be replaced during the generator workflow run
+        dashboard: true
+      firewall: 
+        enabled: true
+      golang:
+        enabled: true
+      neo4j:
+        enabled: true
+        username: 'neo4j'
+      cobaltstrike:
+        enabled: true
+        password: "{{ cs_password }}"  # Will be replaced by GitHub secrets
+        key: "{{ cs_key }}"  # Will be replaced by GitHub secrets
+        dns_over_https: true
+        auth_header_name: "<STAGING_PLACEHOLDER>"  # Will be replaced during the generator workflow run
+        auth_header_value: "<STAGING_PLACEHOLDER>"  # Will be replaced during the generator workflow run
+        socks_ports: 
+          - 9201
+          - 9202
+          - 9203
+        profile: "<STAGING_PLACEHOLDER>"  # Will be replaced during the generator workflow run
+        cdn:
+          - name: "azure1"
+            provider: "azure"
+            hostname: "<STAGING_PLACEHOLDER>"  # Will be replaced during the generator workflow run
+            redirect_url: "https://azure.microsoft.com"
+          - name: "aws"
+            provider: "aws"
+            redirect_url: "https://aws.com"
+      backup: 
+        enabled: false
+        archive_zip: false
+  terraform:
+    state_bucket_name: "densecure-tf"
+    state_bucket_enabled: true
+    state_bucket_key: "<STAGING_PLACEHOLDER>"  # Will be replaced by GitHub secrets
+    state_bucket_region: "us-east-2"
+    state_bucket_endpoint: "https://nyc3.digitaloceanspaces.com"
+    bucket_access_key: "{{ bucket_access_key }}"  # Will be replaced by GitHub secrets
+    bucket_secret_key: "{{ bucket_secret_key }}"  # Will be replaced by GitHub secrets
+    digitalocean_token: "{{ do_token }}"  # Will be replaced by GitHub secrets
+  users:
+    - username: "<STAGING_PLACEHOLDER>"  # Will be replaced during the generator workflow run
+      name: "<STAGING_PLACEHOLDER>"  # Will be replaced during the generator workflow run
+      authorized_keys:
+        - "<STAGING_PLACEHOLDER>"  # Will be replaced during the generator workflow run
+      shell: '/usr/bin/zsh'
+      email: "<STAGING_PLACEHOLDER>" # Will be populated with GitHub user's SSH keys
