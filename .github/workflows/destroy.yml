@@ -1,0 +1,326 @@
+name: Destroy Deployment
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - "config/**"
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: 'Operation Tag (e.g., cs-1111, mythic-2222, phish-3333)'
+        required: true
+        type: string
+        default: 'cs-'
+      op_number:
+        description: 'Operation Number from deployment (e.g., OP001, OP123)'
+        required: true
+        type: string
+        default: 'OP'
+
+jobs:
+  destroy:
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install System Dependencies
+        run: |
+          ./_services/destroy/install_dependencies.sh
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Setup Python Environment
+        run: |
+          ./_services/destroy/setup_python_env.sh
+
+      - name: Find Deploy Artifact
+        id: find_artifact
+        run: |
+          # TODO: COOL: Find a better way to locate artifacts and extract to console.
+          # Extract operation info from inputs
+          OP_TAG="${{ github.event.inputs.repo }}"
+          OP_NUM="${{ github.event.inputs.op_number }}"
+          
+          echo "Looking for deployment with tag: $OP_TAG and operation: $OP_NUM"
+          
+          # Get successful deploy runs and filter by operation number
+          DEPLOY_RUN=$(gh run list --workflow deploy.yml \
+            --json conclusion,databaseId,headBranch,createdAt,displayTitle,url \
+            --jq ".[] | select(.conclusion==\"success\" and 
+              (.headBranch | contains(\"config/$OP_TAG\")))" \
+            | jq -s 'sort_by(.createdAt) | reverse | .[0]')
+          
+          if [ -z "$DEPLOY_RUN" ] || [ "$DEPLOY_RUN" = "null" ]; then
+            echo "No successful deployment found for operation tag: $OP_TAG"
+            echo "Recent successful deployments:"
+            gh run list --workflow deploy.yml \
+              --json conclusion,headBranch,displayTitle,createdAt,url \
+              --jq '.[] | select(.conclusion=="success") | 
+                "- Branch: \(.headBranch)\n  Title: \(.displayTitle)\n  Date: \(.createdAt)\n  URL: \(.url)"'
+            
+            # Fallback: Try direct artifact download using workflow run ID
+            echo "Attempting to find latest successful deployment..."
+            LATEST_SUCCESS=$(gh run list --workflow deploy.yml \
+              --json conclusion,databaseId,url \
+              --jq '.[] | select(.conclusion=="success") | .databaseId' \
+              --limit 5)
+            
+            if [ ! -z "$LATEST_SUCCESS" ]; then
+              # Try each recent successful run, first with operation number, then with op-directory
+              for RUN_ID in $LATEST_SUCCESS; do
+                echo "Checking run ID: $RUN_ID for artifact ${{ github.event.inputs.op_number }}"
+                if gh run download $RUN_ID --name "${{ github.event.inputs.op_number }}" --dir tmp/ 2>/dev/null; then
+                  echo "Successfully found artifact in run $RUN_ID"
+                  echo "run_id=${RUN_ID}" >> $GITHUB_OUTPUT
+                  echo "deploy_date=$(date -u)" >> $GITHUB_OUTPUT
+                  echo "artifact_name=${{ github.event.inputs.op_number }}" >> $GITHUB_OUTPUT
+                  rm -rf tmp/
+                  exit 0
+                fi
+                
+                echo "Checking run ID: $RUN_ID for legacy artifact op-directory"
+                if gh run download $RUN_ID --name "op-directory" --dir tmp/ 2>/dev/null; then
+                  echo "Successfully found legacy artifact in run $RUN_ID"
+                  echo "run_id=${RUN_ID}" >> $GITHUB_OUTPUT
+                  echo "deploy_date=$(date -u)" >> $GITHUB_OUTPUT
+                  echo "artifact_name=op-directory" >> $GITHUB_OUTPUT
+                  rm -rf tmp/
+                  exit 0
+                fi
+              done
+            fi
+            
+            echo "Could not find any deployments with artifacts"
+            exit 1
+          fi
+          
+          RUN_ID=$(echo $DEPLOY_RUN | jq -r '.databaseId')
+          DEPLOY_DATE=$(echo $DEPLOY_RUN | jq -r '.createdAt')
+          
+          echo "Found deployment:"
+          echo "  Branch: $(echo $DEPLOY_RUN | jq -r '.headBranch')"
+          echo "  Title: $(echo $DEPLOY_RUN | jq -r '.displayTitle')"
+          echo "  Date: $DEPLOY_DATE"
+          echo "  Run ID: $RUN_ID"
+          echo "  URL: $(echo $DEPLOY_RUN | jq -r '.url')"
+          
+          echo "run_id=${RUN_ID}" >> $GITHUB_OUTPUT
+          echo "deploy_date=${DEPLOY_DATE}" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Display Deployment Info
+        run: |
+          # TODO: COOL: remove this once we have a better way to locate artifacts
+          echo "Found deployment:"
+          echo "  Run ID: ${{ steps.find_artifact.outputs.run_id }}"
+          echo "  Date: ${{ steps.find_artifact.outputs.deploy_date }}"
+
+      - name: Download and Extract Operation Directory
+        run: |
+          # TODO: COOL: move this to the same step as the artifact download
+          # Ensure we're in the workspace root
+          cd $GITHUB_WORKSPACE
+          
+          # Create temporary directory for download
+          mkdir -p tmp_download
+          cd tmp_download
+          
+          # Debug: List workflow run details
+          echo "Checking workflow run: ${{ steps.find_artifact.outputs.run_id }}"
+          gh api "/repos/${{ github.repository }}/actions/runs/${{ steps.find_artifact.outputs.run_id }}/artifacts" \
+            --jq '.artifacts[] | "- \(.name) (\(.size_in_bytes) bytes)"'
+          
+          # Try downloading with both naming conventions
+          echo "Attempting to download artifact with legacy name..."
+          if gh run download ${{ steps.find_artifact.outputs.run_id }} --name "op-directory" 2>/dev/null; then
+            ARTIFACT_NAME="op-directory"
+            echo "Found legacy artifact"
+          else
+            echo "Attempting to download artifact with operation number..."
+            if gh run download ${{ steps.find_artifact.outputs.run_id }} --name "${{ github.event.inputs.op_number }}" 2>/dev/null; then
+              ARTIFACT_NAME="${{ github.event.inputs.op_number }}"
+              echo "Found operation number artifact"
+            else
+              echo "Failed to find artifact with either naming convention"
+              exit 1
+            fi
+          fi
+          
+          # Debug downloaded files
+          echo "Downloaded files:"
+          ls -la
+          
+          echo "Creating operation directory..."
+          mkdir -p $GITHUB_WORKSPACE/warhorse/OP/${{ github.event.inputs.op_number }}
+          
+          echo "Copying files to operation directory..."
+          cp -r * $GITHUB_WORKSPACE/warhorse/OP/${{ github.event.inputs.op_number }}/
+          
+          echo "Operation directory contents:"
+          ls -la $GITHUB_WORKSPACE/warhorse/OP/${{ github.event.inputs.op_number }}
+          
+          # Cleanup
+          cd $GITHUB_WORKSPACE
+          rm -rf tmp_download
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify Operation Directory
+        run: |
+          # TODO: COOL: extract this to script.
+          OP_DIR="./warhorse/OP/${{ github.event.inputs.op_number }}"
+          if [ ! -f "${OP_DIR}/destroy.yml" ]; then
+            echo "Error: Missing destroy.yml in operation directory"
+            echo "Contents of ${OP_DIR}:"
+            ls -la ${OP_DIR}
+            exit 1
+          fi
+          
+          if [ ! -d "${OP_DIR}/inventory" ]; then
+            echo "Error: Missing inventory directory"
+            exit 1
+          fi
+          
+          echo "Operation directory verified successfully"
+
+      - name: Configure AWS CLI
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_PROFILE: profile_name
+        run: |
+          ./_services/destroy/configure_aws_cli.sh
+
+      - name: Configure Azure CLI
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          ./_services/destroy/configure_azure_cli.sh
+
+      # Run destroy with retry logic
+      - name: Run Ansible Playbook (Destroy)
+        env:
+          ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+          VAULT_KEY: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+          BUCKET_ACCESS_KEY: ${{ secrets.BUCKET_ACCESS_KEY }}
+          DO_TOKEN: ${{ secrets.DO_API_TOKEN }}
+          BUCKET_SECRET_KEY: ${{ secrets.BUCKET_SECRET_KEY }}
+          CS_PASSWORD: ${{ secrets.CS_PASSWORD }}
+          CS_KEY: ${{ secrets.CS_LICENSE_KEY }}
+          ANSIBLE_CONFIG: "/home/runner/work/RedTeamTP/RedTeamTP/warhorse/ansible.cfg"
+          SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          SSH_PRIVATE_KEY_FILE: "/home/runner/work/RedTeamTP/RedTeamTP/warhorse/OP/${{ github.event.inputs.op_number }}/keys/id_rsa_ansible_${{ github.event.inputs.op_number }}"
+          SSH_PASSPHRASE: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+          ANSIBLE_SSH_RETRIES: "10"
+          ANSIBLE_RETRY_FILES_ENABLED: "True"
+          ANSIBLE_RETRY_FILES_SAVE_PATH: "./retry/"
+          MAX_RETRIES: "3"
+          RETRY_DELAY: "10"
+        run: |
+          # TODO: COOL: extract this to script.
+
+          cd warhorse/OP/${{ github.event.inputs.op_number }}/ && \
+          export TERRAFORM_PATH="$(pwd)/terraform"
+          
+          echo "=== Showing Terraform destroy task file ==="
+          echo "File: roles/terraform/tasks/destroy.yml"
+          cat roles/terraform/tasks/destroy.yml
+          echo "========================================="
+          
+          attempt=1
+          max_attempts=$MAX_RETRIES
+          until ansible-playbook destroy.yml \
+            --vault-password-file <(echo "$ANSIBLE_VAULT_PASSWORD") \
+            -i inventory/ \
+            -e "state=absent" \
+            -e "name=${{ github.event.inputs.op_number }}" \
+            -e "bucket_access_key=${BUCKET_ACCESS_KEY}" \
+            -e "terraform_path=${TERRAFORM_PATH}" \
+            -e "bucket_secret_key=${BUCKET_SECRET_KEY}" \
+            -e "digitalocean_token=${DO_TOKEN}" \
+            -e "cs_password=${CS_PASSWORD}" \
+            -e "cs_key=${CS_KEY}" \
+            -e "terraform_project_path=$(pwd)" \
+            -e "subscription_id=${SUBSCRIPTION_ID}" \
+            -e "ansible_ssh_private_key_file=${SSH_PRIVATE_KEY_FILE}" \
+            -e "ssh_passphrase=${SSH_PASSPHRASE}" \
+            -vvv --force-handlers; do
+            if [ $attempt -ge $max_attempts ]; then
+              exit 1
+            fi
+            echo "Attempt $attempt failed. Waiting ${RETRY_DELAY}s before retry..."
+            attempt=$((attempt + 1))
+            sleep $RETRY_DELAY
+          done
+
+          echo "Destruction completed successfully"
+
+      # Status updates
+      - name: Add Labels and Comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # TODO: COOL: extract this to script. Create reusable script / action for PR comments
+          
+          # Extract PR number from branch name for workflow dispatch
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            PR_NUMBER=$(gh pr list --state all --base main --head "config/${{ github.event.inputs.repo }}" --json number --jq '.[0].number')
+          else
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          fi
+          
+          if [ ! -z "$PR_NUMBER" ]; then
+            if [ "${{ job.status }}" == "success" ]; then
+              gh pr edit "$PR_NUMBER" --add-label "config/destroyed"
+              gh pr comment "$PR_NUMBER" --body "✅ Infrastructure destroyed successfully
+              - Timestamp: $(date -u)
+              - Operation: ${{ github.event.inputs.op_number }}
+              - Cleanup completed"
+            else
+              gh pr edit "$PR_NUMBER" --add-label "config/destroy-failed"
+              gh pr comment "$PR_NUMBER" --body "❌ Infrastructure destruction failed
+              - Timestamp: $(date -u)
+              - Operation: ${{ github.event.inputs.op_number }}
+              - Manual cleanup may be required
+              - Please check workflow logs for details"
+            fi
+          else
+            echo "No matching PR found to update"
+          fi
+
+      # Final cleanup
+      - name: Cleanup State
+        if: always()
+        run: |
+          cd warhorse/OP/${{ github.event.inputs.op_number }}/ && \
+          rm -rf .terraform terraform.tfstate* state/
+          echo "Destruction completed at $(date -u)" > destruction_complete
+
+      - name: Delete GitHub Artifact
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # TODO: COOL: extract this to script
+          # Get artifact ID
+          ARTIFACT_ID=$(gh api "/repos/${{ github.repository }}/actions/runs/${{ steps.find_artifact.outputs.run_id }}/artifacts" \
+            --jq ".artifacts[] | select(.name==\"${{ github.event.inputs.op_number }}\" or .name==\"op-directory\") | .id")
+          
+          if [ ! -z "$ARTIFACT_ID" ]; then
+            echo "Deleting artifact ID: $ARTIFACT_ID"
+            gh api --method DELETE "/repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID"
+            echo "Successfully deleted deployment artifact"
+          else
+            echo "No matching artifact found to delete"
+          fi

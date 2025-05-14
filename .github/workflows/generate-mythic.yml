@@ -1,0 +1,89 @@
+name: Generate Mythic Configuration
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation_number:
+        description: 'Operation Number'
+        required: true
+        type: string
+      domain:
+        description: 'Domain TLD'
+        required: true
+        type: string
+      user_tag:
+        description: 'Operator Tag'
+        required: true
+        type: string
+      expiry:
+        description: 'Infrastructure TTL (YYYY-MM-DD)'
+        required: true
+        type: string
+      mythic_admin_password:
+        description: 'Mythic Admin Password'
+        required: true
+        type: string
+      mythic_user_password:
+        description: 'Mythic User Password'
+        required: true
+        type: string
+      cdn_hostname:
+        description: 'CDN Hostname (e.g., mythic-delivery)'
+        required: true
+        type: string
+      github_username:
+        description: 'GitHub Username for SSH Keys'
+        required: true
+        type: string
+
+jobs:
+  generate-mythic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -e .
+          
+      - name: Generate Configuration
+        run: >-
+          ./bin/cli generate 
+          --type mythic
+          --op-number "${{ github.event.inputs.operation_number }}"
+          --domain "${{ github.event.inputs.domain }}"
+          --user-tag "${{ github.event.inputs.user_tag }}"
+          --ttl "${{ github.event.inputs.expiry }}"
+          --mythic-admin-password "${{ github.event.inputs.mythic_admin_password }}"
+          --mythic-user-password "${{ github.event.inputs.mythic_user_password }}"
+          --cdn-hostname "${{ github.event.inputs.cdn_hostname }}"
+          --github-username "${{ github.event.inputs.github_username }}"
+        env:
+          OP_NUMBER: ${{ github.event.inputs.operation_number }}
+          DOMAIN_TLD: ${{ github.event.inputs.domain }}
+          USER_TAG: ${{ github.event.inputs.user_tag }}
+          TTL: ${{ github.event.inputs.expiry }}
+          MYTHIC_ADMIN_PASSWORD: ${{ github.event.inputs.mythic_admin_password }}
+          MYTHIC_USER_PASSWORD: ${{ github.event.inputs.mythic_user_password }}
+          CDN_HOSTNAME: ${{ github.event.inputs.cdn_hostname }}
+          GITHUB_USERNAME: ${{ github.event.inputs.github_username }}
+          # Secrets from GitHub
+          VAULT_KEY: ${{ secrets.VAULT_KEY }}
+          BUCKET_ACCESS_KEY: ${{ secrets.BUCKET_ACCESS_KEY }}
+          BUCKET_SECRET_KEY: ${{ secrets.BUCKET_SECRET_KEY }}
+          DO_TOKEN: ${{ secrets.DO_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v5
+        with:
+          title: 'Config: Generated Mythic configuration'
+          commit-message: 'feat: generate mythic configuration'
+          branch: config/mythic-${{ github.event.inputs.operation_number }}
+          delete-branch: true

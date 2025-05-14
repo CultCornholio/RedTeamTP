@@ -1,0 +1,97 @@
+name: Generate Phishing Configuration
+
+on:
+  workflow_dispatch:
+    inputs:
+      op_number:
+        description: 'Operation number (e.g., OP001)'
+        required: true
+        type: string
+      op_domain_name:
+        description: 'Domain for operation (e.g., phish.example.com)'
+        required: true
+        type: string
+      user_tag:
+        description: 'Operation tag'
+        required: true
+        type: string
+      ttl:
+        description: 'Infrastructure TTL (YYYY-MM-DD)'
+        required: true
+        type: string
+      phish_domains:
+        description: 'Phishlet subdomain (M365 default comma-separated)'
+        required: true
+        type: string
+        default: 'test-www,test-login,test-aadcdn,test-sso'
+      redirect_url:
+        description: 'Post-phishing redirect URL'
+        required: true
+        type: string
+        default: 'https://office.com'
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt 
+
+      # Fetch GitHub Actor's Username
+      - name: Get GitHub Username
+        id: get_user
+        run: echo "GITHUB_USER=${GITHUB_ACTOR}" >> $GITHUB_ENV
+      
+      # Fetch GitHub Actor's SSH Keys
+      - name: Fetch GitHub SSH Keys
+        id: fetch_keys
+        env:
+          GITHUB_USER: ${{ env.GITHUB_USER }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SSH_KEYS=$(curl -s -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/users/${GITHUB_USER}/keys | jq -r '.[].key' | paste -sd ' ' -)
+          echo "GITHUB_SSH_KEYS=${SSH_KEYS}" >> $GITHUB_ENV
+
+      - name: Generate Configuration
+        run: |
+          chmod +x ./bin/cli
+          ./bin/cli generate \
+            --type phish \
+            --op-number "${{ inputs.op_number }}" \
+            --op-domain-name "${{ inputs.op_domain_name }}" \
+            --user-tag "${{ inputs.user_tag }}" \
+            --ttl "${{ inputs.ttl }}" \
+            --phish-domains "${{ inputs.phish_domains }}" \
+            --redirect-url "${{ inputs.redirect_url }}" \
+            --github-user "${{ env.GITHUB_USER }}" \
+            --github-ssh-keys "${{ env.GITHUB_SSH_KEYS }}"
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          title: 'config: Add phishing infrastructure for ${{ inputs.op_number }}'
+          body: |
+            Generates phishing infrastructure configuration:
+            - Operation: ${{ inputs.op_number }}
+            - Domain: ${{ inputs.op_domain_name }}
+            - Target Domains: ${{ inputs.phish_domains }}
+            - Expiry: ${{ inputs.ttl }}
+          branch: config/${{ inputs.op_number }}
+          base: main
+          delete-branch: true
+          labels: |
+            infrastructure
+            phishing
+            automated-pr
+          add-paths: |
+            generated/**

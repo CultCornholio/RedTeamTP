@@ -1,0 +1,175 @@
+name: Generate Cobalt Strike Configuration
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation_number:
+        description: 'Operation Number'
+        required: true
+        type: string
+      domain:
+        description: 'Domain TLD'
+        required: true
+        type: string
+      user_tag:
+        description: 'Operator Tag'
+        required: true
+        type: string
+      expiry:
+        description: 'Infrastructure TTL (YYYY-MM-DD)'
+        required: true
+        type: string
+      cs_profile:
+        description: 'Cobalt Strike Profile Name'
+        required: true
+        type: string
+      cs_auth_header_name:
+        description: 'Cobalt Strike Auth Header Name'
+        required: true
+        type: string
+      cs_auth_header_value:
+        description: 'Cobalt Strike Auth Header Value'
+        required: true
+        type: string
+      cdn_hostname:
+        description: 'Azure CDN Hostname'
+        required: true
+        type: string
+
+jobs:
+  generate-cobalt:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout the repository
+      - uses: actions/checkout@v3
+      
+      # Set up Python environment
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      # Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -e .
+          
+      # Fetch GitHub Actor's Username
+      - name: Get GitHub Username
+        id: get_user
+        run: echo "GITHUB_USER=${GITHUB_ACTOR}" >> $GITHUB_ENV
+      
+      # Fetch GitHub Actor's SSH Keys
+      - name: Fetch GitHub SSH Keys
+        id: fetch_keys
+        env:
+          GITHUB_USER: ${{ env.GITHUB_USER }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SSH_KEYS=$(curl -s -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/users/${GITHUB_USER}/keys | jq -r '.[].key' | paste -sd ' ' -)
+          echo "GITHUB_SSH_KEYS=${SSH_KEYS}" >> $GITHUB_ENV
+      
+      # Generate Cobalt Strike configuration
+      - name: Generate Configuration
+        run: >-
+          ./bin/cli generate 
+          --type cobalt
+          --op-number "${{ github.event.inputs.operation_number }}"
+          --op-domain-name "${{ github.event.inputs.domain }}"
+          --user-tag "${{ github.event.inputs.user_tag }}"
+          --ttl "${{ github.event.inputs.expiry }}"
+          --cs-auth-header-name "${{ github.event.inputs.cs_auth_header_name }}"
+          --cs-auth-header-value "${{ github.event.inputs.cs_auth_header_value }}"
+          --cs-profile "${{ github.event.inputs.cs_profile }}"
+          --cdn-hostname "${{ github.event.inputs.cdn_hostname }}"
+          --github-user "${{ env.GITHUB_USER }}"          
+          --github-ssh-keys "${{ env.GITHUB_SSH_KEYS }}"  
+
+      - name: Install ansible-lint
+        run: |
+          pip install ansible-lint
+
+      - name: Run ansible-lint and generate report
+        continue-on-error: true
+        run: |
+          cd generated
+          
+          # Capture original file for diff
+          cp cobalt.yml cobalt.yml.orig
+          
+          # Run auto-fix first and capture output
+          LINT_OUTPUT=$(ansible-lint cobalt.yml --fix 2>&1) || true
+          
+          # Generate diff of changes
+          DIFF_OUTPUT=$(diff -u cobalt.yml.orig cobalt.yml || true)
+          
+          # Generate detailed report
+          {
+            echo "## Ansible Lint Analysis"
+            echo ""
+            echo "### Applied Fixes"
+            echo "\`\`\`diff"
+            if [ ! -z "$DIFF_OUTPUT" ]; then
+              echo "$DIFF_OUTPUT"
+            else
+              echo "No automatic fixes were applied"
+            fi
+            echo "\`\`\`"
+            echo ""
+            echo "### Auto-fix Results"
+            echo "\`\`\`"
+            echo "$LINT_OUTPUT"
+            echo "\`\`\`"
+            echo ""
+            echo "### Remaining Issues"
+            echo "\`\`\`"
+            ansible-lint cobalt.yml --format full || true
+            echo "\`\`\`"
+            echo ""
+            echo "### Summary"
+            if grep -q "yaml\[indentation\]" <<< "$LINT_OUTPUT"; then
+              echo "⚠️ **Manual Action Required**: YAML indentation issues were detected."
+              echo ""
+              echo "#### Indentation Guidelines:"
+              echo "1. YAML files should use consistent indentation (2 spaces recommended)"
+              echo "2. Nested items should be indented under their parent"
+              echo "3. List items should align with their siblings"
+              echo ""
+              echo "**Affected Lines:**"
+              echo ""
+              grep "yaml\[indentation\]" <<< "$LINT_OUTPUT" | sed 's/^ERROR.*yaml //g' | sed 's/\[\/\]//g' | sed 's/^/- /g'
+              echo ""
+              echo "Example of correct YAML indentation:"
+              echo "\`\`\`yaml"
+              echo "parent_key:"
+              echo "  child_key: value       # 2 spaces indent"
+              echo "  list_key:              # aligned with sibling"
+              echo "    - list_item_1        # 2 spaces under list"
+              echo "    - list_item_2        # aligned with sibling"
+              echo "\`\`\`"
+            else
+              echo "✅ No manual fixes required."
+            fi
+          } > lint-report.md
+          
+          # Cleanup
+          rm cobalt.yml.orig
+          
+      # Create a pull request with the generated configuration
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v5
+        with:
+          title: 'Config: Generated Cobalt Strike configuration'
+          commit-message: |
+            feat: generate cobalt strike configuration
+            
+            Includes ansible-lint auto-fixes and lint report
+          branch: config/cs-${{ github.event.inputs.operation_number }}
+          delete-branch: true
+          labels: |
+            automated-pr
+            needs-review
+          add-paths: |
+            generated/**

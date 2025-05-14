@@ -1,0 +1,114 @@
+name: Deploy Evilginx2 Workflow
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - "config/**"
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: 'Repository'
+        required: true
+        type: string
+      op_number:
+        description: 'Operation Number'
+        required: true
+        type: string
+      dry_run:
+        description: 'Dry Run'
+        required: false
+        type: boolean
+
+jobs:
+  deploy:
+    if: startsWith(github.event.pull_request.title, 'Config:') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set Execution Permissions
+        run: |
+          chmod +x _services/deploy/*.sh
+          
+      - name: Install Dependencies
+        run: |
+          ./_services/deploy/install_dependencies.sh
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+
+      - name: Setup Python Environment
+        run: |
+          ./_services/deploy/setup_python_env.sh
+
+      - name: Configure AWS CLI
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_PROFILE: profile_name
+        run: |
+          ./_services/deploy/configure_aws_cli.sh
+
+      - name: Configure Azure CLI
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          ./_services/deploy/configure_azure_cli.sh
+
+      - name: Run Ansible Playbooks (Generate and Deploy)
+        if: ${{ github.event.inputs.dry_run == 'false' }}
+        env:
+          ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+          VAULT_KEY: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+          BUCKET_ACCESS_KEY: ${{ secrets.BUCKET_ACCESS_KEY }}
+          DO_TOKEN: ${{ secrets.DO_API_TOKEN }}
+          BUCKET_SECRET_KEY: ${{ secrets.BUCKET_SECRET_KEY }}
+          CS_PASSWORD: ${{ secrets.CS_PASSWORD }}
+          CS_KEY: ${{ secrets.CS_LICENSE_KEY }}
+          ANSIBLE_CONFIG: "/home/runner/work/RedTeamTP/RedTeamTP/warhorse/ansible.cfg"
+          SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          SSH_PRIVATE_KEY_FILE: "/home/runner/work/RedTeamTP/RedTeamTP/warhorse/OP/${{ github.event.inputs.op_number }}/keys/id_rsa_ansible_${{ github.event.inputs.op_number }}"
+          SSH_PASSPHRASE: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+          ANSIBLE_SSH_RETRIES: "10"
+          ANSIBLE_RETRY_FILES_ENABLED: "True"
+          ANSIBLE_RETRY_FILES_SAVE_PATH: "./retry/"
+          MAX_RETRIES: "3"
+          RETRY_DELAY: "10"
+          TF_WORKSPACE_MEMORY: "4GB"
+          OP_NUMBER: ${{ github.event.inputs.op_number }}
+        run: |
+          chmod +x ./_services/deploy/phish/run_ansible_playbook.sh &&\
+          ./_services/deploy/phish/run_ansible_playbook.sh
+
+      - name: Save Deployment State
+        if: always()
+        env:
+          OP_NUMBER: ${{ github.event.inputs.op_number }}
+        run: |
+          ./_services/deploy/save_deployment_state.sh
+
+      - name: Upload OP Directory
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.op_number }}
+          path: ./warhorse/OP/${{ github.event.inputs.op_number }}/
+          if-no-files-found: error  # New recommended setting in v4
+
+      - name: Add Labels and Comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./_services/deploy/add_comments.sh \
+            ${{ github.event.pull_request.number }} \
+            ${{ job.status }} \
+            ${{ github.event.inputs.op_number }}
