@@ -17,7 +17,7 @@ warhorse:
         enabled: true
         site_hostname: "redirect"
         admin_hostname: "gpadmin"
-        white_list_ip: "CHANGEME"
+        white_list_ip: "127.0.0.1"
       firewall: 
         enabled: true
       golang:
