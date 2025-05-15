@@ -28,7 +28,7 @@ jobs:
       
       - name: Set Execution Permissions
         run: |
-          chmod +x _services/deploy/*.sh
+          chmod +x _services/destroy/*.sh
           
       - name: Install System Dependencies
         run: |
@@ -54,7 +54,7 @@ jobs:
           echo "Looking for deployment with tag: $OP_TAG and operation: $OP_NUM"
           
           # Get successful deploy runs and filter by operation number
-          DEPLOY_RUN=$(gh run list --workflow deploy.yml \
+          DEPLOY_RUN=$(gh run list --workflow deploy-phish.yml \
             --json conclusion,databaseId,headBranch,createdAt,displayTitle,url \
             --jq ".[] | select(.conclusion==\"success\" and 
               (.headBranch | contains(\"config/$OP_TAG\")))" \
@@ -63,14 +63,14 @@ jobs:
           if [ -z "$DEPLOY_RUN" ] || [ "$DEPLOY_RUN" = "null" ]; then
             echo "No successful deployment found for operation tag: $OP_TAG"
             echo "Recent successful deployments:"
-            gh run list --workflow deploy.yml \
+            gh run list --workflow deploy-phish.yml \
               --json conclusion,headBranch,displayTitle,createdAt,url \
               --jq '.[] | select(.conclusion=="success") | 
                 "- Branch: \(.headBranch)\n  Title: \(.displayTitle)\n  Date: \(.createdAt)\n  URL: \(.url)"'
             
             # Fallback: Try direct artifact download using workflow run ID
             echo "Attempting to find latest successful deployment..."
-            LATEST_SUCCESS=$(gh run list --workflow deploy.yml \
+            LATEST_SUCCESS=$(gh run list --workflow deploy-phish.yml \
               --json conclusion,databaseId,url \
               --jq '.[] | select(.conclusion=="success") | .databaseId' \
               --limit 5)
