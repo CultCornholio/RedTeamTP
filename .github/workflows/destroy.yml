@@ -25,7 +25,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-
+      
+      - name: Set Execution Permissions
+        run: |
+          chmod +x _services/deploy/*.sh
+          
       - name: Install System Dependencies
         run: |
           ./_services/destroy/install_dependencies.sh
